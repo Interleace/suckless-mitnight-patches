@@ -3,30 +3,12 @@ rgb dmx support for dwm and dmenu. don't use it
 
 ![a gif](showcase_rgb_dmx_sync_wihin_dwm_environment.gif)
 
-# suckless RGB stream — X11 and DMX
+# RGB stream — X11 and DMX
 
 `rgbgen` (C) generates `R G B\n` on stdout. `rgbx` (C/Xlib) consumes the same stream and writes `_SUCKLESS_RGB` on the X11 root as `#RRGGBB` (XA_STRING). dwm and dmenu read it on `PropertyNotify`.
 
 The stream is the **source of truth** for both screen and stage (the AI is trying to say, that both are in sync…); every consumer receives the same samples. `rgbgen` is deterministic per `(mode, speed, fps, starting phase)` except real-time pacing.
 
-## Build
-
-( compile the rgb tool set but patch your suckless stuff by hand! )
-
-```sh
-cd rgb-tools && make
-```
-
-To compile dwm, install your usual `libxft-dev`, `libfontconfig-dev`, X11/Xinerama and XCB development dependencies, then run `make` in `dwm/`. This container lacks several of those libraries, so that build has not been verified here.
-
-To patch stock dmenu 5.4, first apply `dmenu-globalzoom-5.4-v2.patch` from the parent folder, and **then** run `patch_dmenu_rgb.py`:
-
-```sh
-cd dmenu-5.4
-patch -p1 < ../dmenu-globalzoom-5.4-v2.patch
-python3 ../patch_dmenu_rgb.py dmenu.c
-make
-```
 
 ## Start and stop
 
@@ -35,10 +17,11 @@ rgbgen -m rainbow -s 0.15 -f 25 | rgbx
 rgbx -c   # delete property, restore original colors
 ```
 
-RGB is temporarily persistent in the X server; after the producer stops, last frame remains until `rgbx -c` or X server restart. No speed-dependent state resides in dwm/dmenu. An optional cleanup trap can clear the property.
+RGB is temporarily persistent in the X server; after the producer stops, last frame remains until `rgbx -c` or X server restart. An optional cleanup trap can clear it.
 
 ## DMX synchronization
 
+This is where the fun begins and everything lights up at sync
 [ untested yet ]
 
 The same RGB lines are reusable for DMX. Do not generate a separate independent rainbow for DMX; phase drift is inevitable. Your UNO daemon uses `/tmp/unodmx.sock`, but its specific accepted socket command format is not evidenced by the supplied files. Therefore this project includes `rgbdmx.py`, which accepts an explicitly configured socket message template. It does **not** assume a DMX socket protocol.
