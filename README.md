@@ -1,6 +1,8 @@
 # suckless-mitnight-patches
 rgb dmx support for dwm and dmenu. don't use it
 
+![a gif](showcase_rgb_dmx_sync_wihin_dwm_environment.gif)
+
 # suckless RGB stream — X11 and DMX
 
 `rgbgen` (C) generates `R G B\n` on stdout. `rgbx` (C/Xlib) consumes the same stream and writes `_SUCKLESS_RGB` on the X11 root as `#RRGGBB` (XA_STRING). dwm and dmenu read it on `PropertyNotify`. No threads, no additional server, no Xresources writes, no UI animation loop.
