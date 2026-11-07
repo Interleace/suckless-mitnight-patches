@@ -1,0 +1,122 @@
+--- a/dwm.c
++++ b/dwm.c
+@@ -307,6 +307,10 @@
+ static int sw, sh;           /* X display screen geometry width, height */
+ static int bh, blw = 0;      /* bar geometry */
+ static int barzoomsize, barzoomdefault;
++static Atom rgbatom;
++static Clr rgbbase[4];
++static int rgbactive;
++static void rgbupdate(void);
+ static Atom uizoomatom;
+ static int globalzoomsteps, barzoomlocal;
+ static int lrpad;            /* sum of left and right padding for text */
+@@ -1445,6 +1449,75 @@
+ 	arrange(selmon);
+ }
+ 
++
++/* Runtime accent comes from a root property, not from config.h or Xresources.
++ * The original color objects remain owned by the schemes. Each dynamic Xft
++ * allocation is released before replacement. A deleted property restores
++ * the original scheme without having to restart dwm. */
++static void
++rgbupdate(void)
++{
++    Atom type;
++    int format, ok = 0, r, g, b;
++    unsigned long count, rest;
++    unsigned char *data = NULL;
++    char buf[16];
++    XftColor next[4];
++    XRenderColor values[4];
++    Visual *visual = DefaultVisual(dpy, screen);
++    Colormap cmap = DefaultColormap(dpy, screen);
++    Monitor *m;
++    Client *c;
++    int i;
++
++    if (XGetWindowProperty(dpy, root, rgbatom, 0, 16, False,
++        XA_STRING, &type, &format, &count, &rest, &data) == Success &&
++        type == XA_STRING && format == 8 && count == 7 && data) {
++        memcpy(buf, data, 7);
++        buf[7] = '\0';
++        if (buf[0] == '#' && sscanf(buf + 1, "%2x%2x%2x", &r, &g, &b) == 3)
++            ok = 1;
++    }
++    if (data)
++        XFree(data);
++
++    if (ok) {
++        /* Selected bar background and focused borders follow the accent;
++         * inactive borders use a quarter-intensity tint. */
++        int bright = (r*299 + g*587 + b*114) > 145000;
++        int fg = bright ? 0 : 255;
++        int v[4][3] = {{r, g, b}, {r, g, b}, {r/4, g/4, b/4}, {fg, fg, fg}};
++        for (i = 0; i < 4; i++) {
++            values[i].red   = (unsigned short)(v[i][0] * 257);
++            values[i].green = (unsigned short)(v[i][1] * 257);
++            values[i].blue  = (unsigned short)(v[i][2] * 257);
++            values[i].alpha = 65535;
++            if (!XftColorAllocValue(dpy, visual, cmap, &values[i], &next[i])) {
++                while (i-- > 0)
++                    XftColorFree(dpy, visual, cmap, &next[i]);
++                return;
++            }
++        }
++    }
++    if (rgbactive) {
++        XftColorFree(dpy, visual, cmap, &scheme[SchemeSel][ColBg]);
++        XftColorFree(dpy, visual, cmap, &scheme[SchemeSel][ColBorder]);
++        XftColorFree(dpy, visual, cmap, &scheme[SchemeNorm][ColBorder]);
++        XftColorFree(dpy, visual, cmap, &scheme[SchemeSel][ColFg]);
++    }
++    scheme[SchemeSel][ColBg] = ok ? next[0] : rgbbase[0];
++    scheme[SchemeSel][ColBorder] = ok ? next[1] : rgbbase[1];
++    scheme[SchemeNorm][ColBorder] = ok ? next[2] : rgbbase[2];
++    scheme[SchemeSel][ColFg] = ok ? next[3] : rgbbase[3];
++    rgbactive = ok;
++    for (m = mons; m; m = m->next) {
++        for (c = m->clients; c; c = c->next)
++            XSetWindowBorder(dpy, c->win,
++                scheme[c == m->sel ? SchemeSel : SchemeNorm][ColBorder].pixel);
++        drawbar(m);
++    }
++}
++
+ void
+ propertynotify(XEvent *e)
+ {
+@@ -1452,7 +1525,9 @@
+ 	Window trans;
+ 	XPropertyEvent *ev = &e->xproperty;
+ 
+-	if (ev->window == root && ev->atom == uizoomatom &&
++	if (ev->window == root && ev->atom == rgbatom) {
++        rgbupdate();
++    } else if (ev->window == root && ev->atom == uizoomatom &&
+         ev->state == PropertyNewValue) {
+         globalzoomsteps = zoomread();
+         barzoomrefresh();
+@@ -1936,6 +2011,7 @@
+ 	sh = DisplayHeight(dpy, screen);
+ 	root = RootWindow(dpy, screen);
+     uizoomatom = XInternAtom(dpy, "_SUCKLESS_UI_ZOOM", False);
++    rgbatom = XInternAtom(dpy, "_SUCKLESS_RGB", False);
+ 	drw = drw_create(dpy, screen, root, sw, sh);
+ 	if (!drw_fontset_create(drw, fonts, LENGTH(fonts)))
+ 		die("no fonts could be loaded.");
+@@ -1981,8 +2057,13 @@
+ 	scheme = ecalloc(LENGTH(colors), sizeof(Clr *));
+ 	for (i = 0; i < LENGTH(colors); i++)
+ 		scheme[i] = drw_scm_create(drw, colors[i], 3);
++    rgbbase[0] = scheme[SchemeSel][ColBg];
++    rgbbase[1] = scheme[SchemeSel][ColBorder];
++    rgbbase[2] = scheme[SchemeNorm][ColBorder];
++    rgbbase[3] = scheme[SchemeSel][ColFg];
+ 	/* init bars */
+ 	updatebars();
++    rgbupdate();
+     if (globalzoomsteps)
+         barzoomrefresh();
+ 	updatestatus();

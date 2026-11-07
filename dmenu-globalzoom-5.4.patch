@@ -1,0 +1,188 @@
+--- a/dmenu.c
++++ b/dmenu.c
+@@ -18,3 +18,4 @@
+ #include <X11/Xft/Xft.h>
++#include <stdint.h>
+ 
+ #include "drw.h"
+@@ -39,2 +40,9 @@
+ static int bh, mw, mh;
++static int menux, menutop, menubottom, menumaxheight;
++static int menudefault = 10, menusize = 10, menulines;
++static Atom globalzoomatom;
++static int globalzoomsteps;
++static void menuchange(int);
++static void globalzoomwrite(int, int);
++static int globalzoomread(void);
+ static int inputw = 0, promptw;
+@@ -332,1 +340,16 @@
++    /* dmenu grabs the keyboard: forward the common binding ourselves. */
++    if ((ev->state & (ControlMask | ShiftMask | Mod4Mask)) ==
++        (ControlMask | ShiftMask | Mod4Mask)) {
++        KeySym key = XLookupKeysym(ev, 0);
++        if (key == XK_equal || key == XK_plus) { globalzoomwrite(+1, 0); return; }
++        if (key == XK_minus) { globalzoomwrite(-1, 0); return; }
++        if (key == XK_0) { globalzoomwrite(0, 1); return; }
++    }
++    if ((ev->state & (ControlMask | Mod1Mask)) ==
++        (ControlMask | Mod1Mask)) {
++        KeySym key = XLookupKeysym(ev, 0);
++        if (key == XK_equal || key == XK_plus) { menuchange(+1); return; }
++        if (key == XK_minus) { menuchange(-1); return; }
++        if (key == XK_0) { menuchange(menudefault - menusize); return; }
++    }
+ 	len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
+@@ -579,3 +602,103 @@
++/* The X root owns a signed integer zoom offset; no daemon is involved. */
++static int
++globalzoomread(void)
++{
++    Atom type;
++    int fmt, value = 0;
++    unsigned long count, after;
++    unsigned char *data = NULL;
++    if (XGetWindowProperty(dpy, root, globalzoomatom, 0, 1, False,
++        XA_INTEGER, &type, &fmt, &count, &after, &data) == Success) {
++        if (type == XA_INTEGER && fmt == 32 && count == 1)
++            value = (int)(int32_t)((long *)data)[0];
++        if (data) XFree(data);
++    }
++    return MAX(-4, MIN(12, value));
++}
++
++static void
++menuchange(int delta)
++{
++    FcPattern *pattern;
++    FcChar8 *name;
++    char *scaled[LENGTH(fonts)] = {0};
++    Fnt *old, *new;
++    double pts, px, initial, change;
++    int i, n, pixelmode, y;
++
++    n = menusize + delta;
++    if (n < 6 || n > 36 || !delta)
++        return;
++    change = n - menudefault;
++    for (i = 0; i < (int)LENGTH(fonts); i++) {
++        if (!(pattern = FcNameParse((FcChar8 *)fonts[i])))
++            goto out;
++        pixelmode = FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &px)
++            == FcResultMatch;
++        if (pixelmode)
++            initial = px;
++        else if (FcPatternGetDouble(pattern, FC_SIZE, 0, &pts)
++                 == FcResultMatch)
++            initial = pts;
++        else
++            initial = menudefault;
++        if (initial + change < 6) {
++            FcPatternDestroy(pattern);
++            goto out;
++        }
++        FcPatternDel(pattern, FC_SIZE);
++        FcPatternDel(pattern, FC_PIXEL_SIZE);
++        if (!FcPatternAddDouble(pattern, pixelmode ? FC_PIXEL_SIZE : FC_SIZE,
++                                initial + change)) {
++            FcPatternDestroy(pattern);
++            goto out;
++        }
++        name = FcNameUnparse(pattern);
++        FcPatternDestroy(pattern);
++        if (!name)
++            goto out;
++        scaled[i] = (char *)name;
++    }
++    old = drw->fonts;
++    if (!(new = drw_fontset_create(drw, scaled, LENGTH(scaled)))) {
++        drw->fonts = old;
++        goto out;
++    }
++    drw_fontset_free(old);
++    menusize = n;
++    lrpad = drw->fonts->h;
++    bh = drw->fonts->h + 2;
++    lines = MIN(menulines, MAX(0, menumaxheight / bh - 1));
++    mh = (lines + 1) * bh;
++    promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
++    y = topbar ? menutop : menubottom - mh;
++    XMoveResizeWindow(dpy, win, menux, y, mw, mh);
++    drw_resize(drw, mw, mh);
++    calcoffsets();
++    drawmenu();
++out:
++    for (i = 0; i < (int)LENGTH(fonts); i++)
++        if (scaled[i]) FcStrFree((FcChar8 *)scaled[i]);
++}
++
++static void
++globalzoomwrite(int delta, int reset)
++{
++    long n = reset ? 0 : globalzoomread() + delta;
++    n = MAX(-4, MIN(12, n));
++    XChangeProperty(dpy, root, globalzoomatom, XA_INTEGER, 32,
++                    PropModeReplace, (unsigned char *)&n, 1);
++    XFlush(dpy);
++}
++
++static void
++globalzoomupdate(void)
++{
++    int n = globalzoomread(), delta = n - globalzoomsteps;
++    menuchange(delta);
++    globalzoomsteps = n;
++}
++
+ static void
+ run(void)
+ {
+@@ -586,2 +709,8 @@
+ 		switch(ev.type) {
++        case PropertyNotify:
++            if (ev.xproperty.window == root &&
++                ev.xproperty.atom == globalzoomatom &&
++                ev.xproperty.state == PropertyNewValue)
++                globalzoomupdate();
++            break;
+ 		case DestroyNotify:
+@@ -675,2 +804,3 @@
+ 		mw = info[i].width;
++        menumaxheight = info[i].height;
+ 		XFree(info);
+@@ -685,3 +815,8 @@
+ 		mw = wa.width;
++        menumaxheight = wa.height;
+ 	}
++    menux = x;
++    menutop = y;
++    menubottom = y + mh;
++    menulines = lines;
+ 	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
+@@ -719,3 +854,5 @@
+ 	drw_resize(drw, mw, mh);
++    if (globalzoomsteps)
++        menuchange(globalzoomsteps);
+ 	drawmenu();
+ }
+@@ -782,2 +919,5 @@
+ 	root = RootWindow(dpy, screen);
++    globalzoomatom = XInternAtom(dpy, "_SUCKLESS_UI_ZOOM", False);
++    XSelectInput(dpy, root, PropertyChangeMask);
++    globalzoomsteps = globalzoomread();
+ 	if (!embed || !(parentwin = strtol(embed, NULL, 0)))
+@@ -788,3 +928,15 @@
+ 	if (!drw_fontset_create(drw, fonts, LENGTH(fonts)))
+ 		die("no fonts could be loaded.");
++    {
++        FcPattern *p = FcNameParse((FcChar8 *)fonts[0]);
++        double n;
++        if (p) {
++            if ((FcPatternGetDouble(p, FC_PIXEL_SIZE, 0, &n) == FcResultMatch ||
++                 FcPatternGetDouble(p, FC_SIZE, 0, &n) == FcResultMatch) &&
++                n >= 6 && n <= 36)
++                menudefault = (int)(n + .5);
++            FcPatternDestroy(p);
++        }
++        menusize = menudefault;
++    }
+ 	lrpad = drw->fonts->h;
