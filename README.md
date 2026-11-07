@@ -5,11 +5,13 @@ rgb dmx support for dwm and dmenu. don't use it
 
 # suckless RGB stream — X11 and DMX
 
-`rgbgen` (C) generates `R G B\n` on stdout. `rgbx` (C/Xlib) consumes the same stream and writes `_SUCKLESS_RGB` on the X11 root as `#RRGGBB` (XA_STRING). dwm and dmenu read it on `PropertyNotify`. No threads, no additional server, no Xresources writes, no UI animation loop.
+`rgbgen` (C) generates `R G B\n` on stdout. `rgbx` (C/Xlib) consumes the same stream and writes `_SUCKLESS_RGB` on the X11 root as `#RRGGBB` (XA_STRING). dwm and dmenu read it on `PropertyNotify`.
 
-The stream is the **source of truth** for both screen and stage; every consumer receives the same samples. `rgbgen` is deterministic per `(mode, speed, fps, starting phase)` except real-time pacing.
+The stream is the **source of truth** for both screen and stage (the AI is trying to say, that both are in sync…); every consumer receives the same samples. `rgbgen` is deterministic per `(mode, speed, fps, starting phase)` except real-time pacing.
 
 ## Build
+
+( compile the rgb tool set but patch your suckless stuff by hand! )
 
 ```sh
 cd rgb-tools && make
@@ -29,13 +31,15 @@ make
 ## Start and stop
 
 ```sh
-./rgb-tools/rgbgen -m rainbow -s 0.15 -f 25 | ./rgb-tools/rgbx
-./rgb-tools/rgbx -c   # delete property, restore original colors
+rgbgen -m rainbow -s 0.15 -f 25 | rgbx
+rgbx -c   # delete property, restore original colors
 ```
 
 RGB is temporarily persistent in the X server; after the producer stops, last frame remains until `rgbx -c` or X server restart. No speed-dependent state resides in dwm/dmenu. An optional cleanup trap can clear the property.
 
 ## DMX synchronization
+
+[ untested yet ]
 
 The same RGB lines are reusable for DMX. Do not generate a separate independent rainbow for DMX; phase drift is inevitable. Your UNO daemon uses `/tmp/unodmx.sock`, but its specific accepted socket command format is not evidenced by the supplied files. Therefore this project includes `rgbdmx.py`, which accepts an explicitly configured socket message template. It does **not** assume a DMX socket protocol.
 
